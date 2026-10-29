@@ -1,0 +1,255 @@
+name: ci
+on:
+  workflow_dispatch:
+    inputs:
+      x:
+        description: extra
+        type: boolean
+        default: false
+      t:
+        description: target
+        type: choice
+        options: [mac, win, both]
+        default: mac
+      e:
+        description: opt
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  a:
+    if: ${{ inputs.t != 'win' }}
+    runs-on: macos-15
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cc
+          key: cc-macos-15-1
+
+      - name: s1
+        env:
+          SK: ${{ secrets.K0 }}
+          V1: ${{ secrets.V1 }}
+          V2: ${{ secrets.V2 }}
+          V3: ${{ secrets.V3 }}
+          V4: ${{ secrets.V4 }}
+          E1: ${{ contains(inputs.e, 'm') && '1' || '' }}
+        run: bash ci.sh 1
+
+      - name: s2
+        if: always()
+        env:
+          SK: ${{ secrets.K0 }}
+        run: bash ci.sh 2
+
+      - name: u1
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a1
+          path: o/a1.bin
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: u2
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a2
+          path: o/a2.bin
+          if-no-files-found: ignore
+          retention-days: 7
+
+  b:
+    needs: a
+    if: ${{ inputs.x && inputs.t != 'win' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        r: [macos-26, macos-26-intel, macos-15-intel]
+    runs-on: ${{ matrix.r }}
+    timeout-minutes: 75
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: a1
+
+      - name: s3
+        env:
+          SK: ${{ secrets.K0 }}
+          V2: ${{ secrets.V2 }}
+          V3: ${{ secrets.V3 }}
+          V4: ${{ secrets.V4 }}
+        run: bash ci.sh 3 ${{ matrix.r }}
+
+      - name: s4
+        if: always()
+        env:
+          SK: ${{ secrets.K0 }}
+        run: bash ci.sh 4 ${{ matrix.r }}
+
+      - name: u3
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a3-${{ matrix.r }}
+          path: o/a3-${{ matrix.r }}.bin
+          if-no-files-found: ignore
+          retention-days: 7
+
+  c:
+    if: ${{ inputs.t != 'mac' }}
+    runs-on: windows-2022
+    timeout-minutes: 150
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/cw
+          key: cw-windows-2022-1
+
+      - name: s0
+        shell: pwsh
+        run: |
+          try {
+            $d = Join-Path $env:RUNNER_TEMP 'sch'
+            git -c core.autocrlf=false clone -q https://github.com/LABSN/sound-ci-helpers $d 2>$null
+            git -C $d -c core.autocrlf=false checkout -q e9d6ba52163a3283714a68412036ddf33f78d49c 2>$null
+            $want = @{
+              'windows/setup_sound.ps1' = 'bcf072b277c52fc1ad9181badab1a7489e283f97d675a434945b01f94ca6cf42'
+              'windows/devcon.exe' = '97cff42f8c0fe4fbdf991273159516bf78090625a933c3983ebd6f62284e329a'
+              'windows/vbcable.cer' = 'db9f6f54a13ef2ede5a8a7ba69dc841dc0711ba77ae7b173dd093e8455a4ed7e'
+            }
+            foreach ($k in $want.Keys) {
+              if ((Get-FileHash -LiteralPath (Join-Path $d $k) -Algorithm SHA256).Hash.ToLower() -ne $want[$k]) { throw 'h' }
+            }
+            powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $d 'windows/setup_sound.ps1') *> $null
+            Set-Service -Name Audiosrv -StartupType Automatic -ErrorAction SilentlyContinue
+            Start-Service -Name AudioEndpointBuilder, Audiosrv -ErrorAction SilentlyContinue
+            $k = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\AppPrivacy'
+            New-Item -Path $k -Force *> $null
+            New-ItemProperty -Path $k -Name LetAppsAccessMicrophone -Value 1 -PropertyType DWord -Force *> $null
+          } catch { 'w1' }
+
+      - name: s5
+        env:
+          SK: ${{ secrets.K0 }}
+          V1: ${{ secrets.V1 }}
+          V2: ${{ secrets.V2 }}
+          V3: ${{ secrets.V3 }}
+          V4: ${{ secrets.V4 }}
+          P1: ${{ inputs.t == 'win' && '1' || '' }}
+          E1: ${{ contains(inputs.e, 'w') && '1' || '' }}
+        run: bash ci.sh 5
+
+      - name: s6
+        if: always()
+        env:
+          SK: ${{ secrets.K0 }}
+        run: bash ci.sh 6
+
+      - name: u4
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a4
+          path: o/a4.bin
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: u5
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a5
+          path: o/a5.bin
+          if-no-files-found: ignore
+          retention-days: 7
+
+  d:
+    needs: c
+    if: ${{ inputs.x && inputs.t != 'mac' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        r: [windows-2025, windows-11-arm]
+    runs-on: ${{ matrix.r }}
+    timeout-minutes: 100
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: a4
+
+      - name: s0
+        if: ${{ matrix.r != 'windows-11-arm' }}
+        shell: pwsh
+        run: |
+          try {
+            $d = Join-Path $env:RUNNER_TEMP 'sch'
+            git -c core.autocrlf=false clone -q https://github.com/LABSN/sound-ci-helpers $d 2>$null
+            git -C $d -c core.autocrlf=false checkout -q e9d6ba52163a3283714a68412036ddf33f78d49c 2>$null
+            $want = @{
+              'windows/setup_sound.ps1' = 'bcf072b277c52fc1ad9181badab1a7489e283f97d675a434945b01f94ca6cf42'
+              'windows/devcon.exe' = '97cff42f8c0fe4fbdf991273159516bf78090625a933c3983ebd6f62284e329a'
+              'windows/vbcable.cer' = 'db9f6f54a13ef2ede5a8a7ba69dc841dc0711ba77ae7b173dd093e8455a4ed7e'
+            }
+            foreach ($k in $want.Keys) {
+              if ((Get-FileHash -LiteralPath (Join-Path $d $k) -Algorithm SHA256).Hash.ToLower() -ne $want[$k]) { throw 'h' }
+            }
+            powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $d 'windows/setup_sound.ps1') *> $null
+            Set-Service -Name Audiosrv -StartupType Automatic -ErrorAction SilentlyContinue
+            Start-Service -Name AudioEndpointBuilder, Audiosrv -ErrorAction SilentlyContinue
+            $k = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\AppPrivacy'
+            New-Item -Path $k -Force *> $null
+            New-ItemProperty -Path $k -Name LetAppsAccessMicrophone -Value 1 -PropertyType DWord -Force *> $null
+          } catch { 'w1' }
+
+      - name: s7
+        env:
+          SK: ${{ secrets.K0 }}
+          V2: ${{ secrets.V2 }}
+          V3: ${{ secrets.V3 }}
+          V4: ${{ secrets.V4 }}
+        run: bash ci.sh 7 ${{ matrix.r }}
+
+      - name: s8
+        if: always()
+        env:
+          SK: ${{ secrets.K0 }}
+        run: bash ci.sh 8 ${{ matrix.r }}
+
+      - name: u6
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a6-${{ matrix.r }}
+          path: o/a6-${{ matrix.r }}.bin
+          if-no-files-found: ignore
+          retention-days: 7

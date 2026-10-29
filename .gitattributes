@@ -1,0 +1,2 @@
+# no line-ending conversion anywhere (Windows runners would turn ci.sh into CRLF)
+* -text
